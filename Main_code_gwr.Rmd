@@ -1,0 +1,1169 @@
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(tmap)
+library(sf)
+library(janitor)
+library(sp)
+library(spdep)
+library(ggplot2)
+library(sf)
+library(ggspatial)  # For compass and scale bar
+library(RColorBrewer)
+library(gridExtra)
+library(car)
+library(spgwr)
+library(RColorBrewer)
+library(ggspatial)
+library(spatialreg)
+library(patchwork)
+```
+
+```{r}
+setwd("C:/Users/ACER/Documents/Term 1-SGDS-UCL/GEOG0114-Principles of Spatial Analysis/Coursework")
+```
+
+
+```{r}
+jakarta_main<-st_read("gadm41_IDN_4.json/gadm41_IDN_4.json")%>%
+  filter(NAME_1=="JakartaRaya" & NAME_2!="KepulauanSeribu")%>%
+  mutate(NAME_4=tolower(NAME_4))%>%
+  select(c(NAME_4,NAME_3,NAME_2,geometry))%>%
+  distinct()
+```
+
+```{r}
+st_crs(jakarta_main)
+st_transform(jakarta_main,23830)#DGN95 / Indonesia TM-3 zone 46.2
+```
+
+In this section, I am loading the data required for the analysis.
+
+Most of the data is only available in PDF format (official reports or statistics). Due to this, I manually extracted the data into Excel, where I further cleaned it based on the required columns. Additionally, I translated all the column names into English for consistency.
+
+Because there is no unique identifier for ward names that could be used for merging, I decided to create a new column with standardized ward names. This was done to simplify the merging process based on the standardized column. The standardized names were created in Excel.
+```{r}
+#Cumulative COVID-19 data as of October 2020 by ward
+covid_oct2020_data<-read_csv("Recap of Daily Covid-19 Data Per Subdistrict of DKI Jakarta Province for October 2020.csv",na=c(""))%>%
+  distinct()
+#Note: This dataset is based on Indonesian citizens registered as Jakarta residents per ward. 
+#Source: https://satudata.jakarta.go.id/open-data/detail?kategori=dataset&page_url=rekap-data-harian-covid-19-per-kelurahan-provinsi-dki-jakarta-bulan-oktober-2020&data_no=1
+
+#Jakarta Population data for 2020 (as of December 31, 2020)
+jkt_pop_2020_data<-read_csv("Number of Jakarta Population per Ward in 2020.csv",na=c(""))%>%
+  distinct()
+#Note: This dataset represents Indonesians residing in Jakarta in 2020. However, the documentation does not clarify whether the data reflects only the population as of December 31 or the total unique number of Indonesians who stayed in Jakarta throughout 2020.
+#source: https://drive.google.com/file/d/1xoAJCuZeZ4FJaihsfIeBnX-tEvYfUC0h/view
+
+#Jakarta Impairment Population data for 2020
+jkt_impairmentpop_2020_data<-read_csv("Data of People with Disabilities in DKI Jakarta Province, 2020 Per Ward, DKI Jakarta Province.csv",na=c(""))%>%
+  distinct()
+#Note: People with visual and hearing impairments are categorized into "People With Physical Disability" category.
+#Source:https://satudata.jakarta.go.id/open-data/detail?kategori=dataset&page_url=data-jumlah-penduduk-lanjut-usia-berdasarkan-jenis-kelamin-dan-usia-per-kelurahan-provinsi-dki-jakarta&data_no=1
+
+#Social Vulnerability 2020 data
+social_vulnerability_index_2020<-read_csv("Jakarta Province Social Vulnerability Potential Index, Dki Jakarta Province Central Statistics Agency 2020.csv",na=c(""))%>%
+  distinct()
+#source: https://jakarta.bps.go.id/id/publication/2022/06/09/e87d41b4f941968d011c2b60/indeks-potensi-kerawanan-sosial-provinsi-dki-jakarta-2020-.html
+
+#Number of health facitilies 2020 data
+jkt_health_facilities_2020<-read_csv("Number of Health Facilities by ward in 2020.csv",na=c(""))%>%
+  distinct()
+#Note: In Indonesia, polyclinics, doctor’s practices, and pharmacies may overlap, and there is no clear documentation indicating whether these categories are mutually exclusive. Furthermore, the categories for health facilities include: Hospital, Health Center with Inpatient Care, Non-Inpatient Health Center, Auxiliary Health Center, Polyclinic/Treatment Center, Doctor's Practice Place, Village Health Post, Pharmacy, Specialty Medicine/Herb Shop. To simplify, I grouped these into three categories: Hospitals, Community Health Center & Polyclinic, and Doctor's Practice & Pharmacy. Furthermore, Hospitals in this dataset may also include specialty hospitals, such as eye hospitals or cancer hospitals, etc.
+
+#source: https://jakarta.bps.go.id/id/publication/2021/12/22/71bedfa7e9249317c7a79171/statistik-potensi-kelurahan-kota-jakarta-selatan-agregasi-data-kelurahan-2020.html, https://jakarta.bps.go.id/id/publication/2021/12/22/9714cfe1486e2de42a488a8f/statistik-potensi-kelurahan-kota-jakarta-barat-agregasi-data-kelurahan-2020.html, https://jakarta.bps.go.id/id/publication/2021/12/22/97b485c98e0b61e9b060154b/statistik-potensi-kelurahan-kabupaten-kepulauan-seribu-agregasi-data-kelurahan-2020.html, https://jakarta.bps.go.id/id/publication/2021/12/22/bb53978c70d1bc806aa07cfe/statistik-potensi-kelurahan-kota-jakarta-utara-agregasi-data-kelurahan-2020.html, https://jakarta.bps.go.id/id/publication/2021/12/22/39914b782b9c3a9c62c8d4a3/statistik-potensi-kelurahan-kota-jakarta-timur-agregasi-data-kelurahan-2020.html, https://jakarta.bps.go.id/id/publication/2021/12/22/efdebf967a9d1f3cd76954ce/statistik-potensi-kelurahan-kota-jakarta-pusat-agregasi-data-kelurahan-2020.html
+
+#Number of Point of Interests 2020 data
+jkt_poi_2020<-read_csv("Number of Point of Interests by ward in 2020.csv",na=c(""))%>%
+  distinct()
+#note: The dataset contains information about various POI categories, including: Mini Market/Supermarket, Restaurant/Dining House, Shop/Shop Food Drink, Local Grocery Store, Grocery Store, Supermarket, Restaurant, Cafe, Hotel, Accommodation, Shophouse, Indoor Market, Market with semi permanent building, Outdoor Market. hese categories were grouped into three broader classifications: "Stores, Supermarkets, Restaurants", "Hotels and Accommodations", "Shophouses and Markets"
+#source: https://jakarta.bps.go.id/id/publication/2021/12/22/71bedfa7e9249317c7a79171/statistik-potensi-kelurahan-kota-jakarta-selatan-agregasi-data-kelurahan-2020.html, https://jakarta.bps.go.id/id/publication/2021/12/22/9714cfe1486e2de42a488a8f/statistik-potensi-kelurahan-kota-jakarta-barat-agregasi-data-kelurahan-2020.html, https://jakarta.bps.go.id/id/publication/2021/12/22/97b485c98e0b61e9b060154b/statistik-potensi-kelurahan-kabupaten-kepulauan-seribu-agregasi-data-kelurahan-2020.html, https://jakarta.bps.go.id/id/publication/2021/12/22/bb53978c70d1bc806aa07cfe/statistik-potensi-kelurahan-kota-jakarta-utara-agregasi-data-kelurahan-2020.html, https://jakarta.bps.go.id/id/publication/2021/12/22/39914b782b9c3a9c62c8d4a3/statistik-potensi-kelurahan-kota-jakarta-timur-agregasi-data-kelurahan-2020.html, https://jakarta.bps.go.id/id/publication/2021/12/22/efdebf967a9d1f3cd76954ce/statistik-potensi-kelurahan-kota-jakarta-pusat-agregasi-data-kelurahan-2020.html
+```
+
+This is the part where I merged all the datasets into the `overall_metrics` dataset and selects relevant columns with clean, standardized names. I also create some various percentages to convert count data into rate form which later on I will transform into log transformations for the linear regression analysis.
+```{r}
+overall_metrics <- covid_oct2020_data %>%
+  left_join(jakarta_main, by = c("Helper Name" = "NAME_4")) %>%
+  left_join(jkt_pop_2020_data, by = c("Helper Name" = "Ward")) %>%
+  left_join(jkt_impairmentpop_2020_data, by = c("Helper Name" = "Ward"))%>%
+  left_join(social_vulnerability_index_2020, by = c("Helper Name" = "Ward")) %>%
+  left_join(jkt_health_facilities_2020, by = c("Helper Name" = "Ward"))%>%
+  left_join(jkt_poi_2020, by = c("Helper Name" = "Ward"))%>%
+  mutate(male_population_percentage=`Male Population`/`Total Population`*100)%>%
+  mutate(female_population_percentage=`Female Population`/`Total Population`*100)%>%
+  mutate(young_population_percentage=`Total Population (0-18 Years Old)`/`Total Population`*100)%>%
+  mutate(old_population_percentage=`Total Population (>= 60 Years Old)`/`Total Population`*100)%>%
+  mutate(physical_disability_population_percentage=`People With Physical Disability`/`Total Population`*100)%>%
+  mutate(cognitive_disability_population_percentage=`People with Cognitive Disabilities`/`Total Population`*100)%>%
+  mutate(cognitive_physical_disability_population_percentage=`People with Physical and Cognitive Disabilities`/`Total Population`*100)%>%
+  mutate(positive_case_percentage=`Positive Covid-19 Case`/`Total Population`*100)%>%
+  mutate(death_case_percentage=Deaths/`Total Population`*100)%>%
+  mutate(hospital_coverage_percentage=Hospitals/`Total Population`*100)%>%
+  mutate(healthcenter_coverage_percentage=`Community Health Center & Polyclinic`/`Total Population`*100)%>%
+  mutate(doctor_pharmacy_coverage_percentage=`Doctor's Practice & Pharmacy`/`Total Population`*100)%>%
+  mutate(stores_coverage_percentage=`Stores, Supermarkets, Restaurants`/`Total Population`*100)%>%
+  mutate(hotels_coverage_percentage=`Hotels and Accommodations`/`Total Population`*100)%>%
+  mutate(markets_coverage_percentage=`Shophouses and Markets`/`Total Population`*100)
+  
+  
+  
+  
+overall_metrics<-overall_metrics%>%
+  select(c(Ward_id, `Ward Name`, NAME_3, NAME_2, `Total Population`,`Male Population`,male_population_percentage,`Female Population`, female_population_percentage, `Total Population (0-18 Years Old)`, young_population_percentage, `Total Population (>= 60 Years Old)`, old_population_percentage, `People With Physical Disability`, physical_disability_population_percentage, `People with Cognitive Disabilities`, cognitive_disability_population_percentage, `People with Physical and Cognitive Disabilities`,  cognitive_physical_disability_population_percentage, `Positive Covid-19 Case`, positive_case_percentage, Deaths, death_case_percentage, `Poverty Prone Index`, `Environmental and Health Vulnerability Index`, `Physical Infrastructure Vulnerability Index`, `Security and Order Vulnerability Index`, Hospitals, hospital_coverage_percentage, `Community Health Center & Polyclinic`, healthcenter_coverage_percentage, `Doctor's Practice & Pharmacy`, doctor_pharmacy_coverage_percentage, `Stores, Supermarkets, Restaurants`, stores_coverage_percentage, `Hotels and Accommodations`, hotels_coverage_percentage, `Shophouses and Markets`, markets_coverage_percentage, geometry))%>%
+  rename(`Total Death Case`=Deaths, 
+         Subdistrict=NAME_3, district=NAME_2)%>%mutate(district = case_when(
+      district == "JakartaUtara" ~ "North Jakarta",
+      district == "JakartaBarat" ~ "West Jakarta",
+      district == "JakartaPusat" ~ "Central Jakarta",
+      district == "JakartaTimur" ~ "East Jakarta",
+      district == "JakartaSelatan" ~ "South Jakarta",
+      TRUE ~ district))%>%
+  filter(!is.na(district))%>%  #removing the Thousand Islands' wards
+  janitor::clean_names()%>%
+  st_as_sf()
+st_geometry(overall_metrics)
+           
+```
+```{r}
+jakarta_district<-st_read("gadm41_IDN_2.json/gadm41_IDN_2.json")%>%
+  filter(NAME_2=="JakartaBarat" | NAME_2=="JakartaPusat" | NAME_2=="JakartaSelatan" | NAME_2=="JakartaTimur" | NAME_2=="JakartaUtara")%>%
+  mutate(
+    NAME_2 = case_when(
+      NAME_2 == "JakartaBarat" ~ "West Jakarta",
+      NAME_2 == "JakartaPusat" ~ "Central\nJakarta",
+      NAME_2 == "JakartaSelatan" ~ "South Jakarta",
+      NAME_2 == "JakartaTimur" ~ "East\nJakarta",
+      NAME_2 == "JakartaUtara" ~ "North Jakarta",
+      TRUE ~ " "
+    )
+  )%>%select(c(NAME_2, geometry))
+
+neighboring_cities<-st_read("gadm41_IDN_2.json/gadm41_IDN_2.json") %>%
+  filter(NAME_2=="Bekasi" | NAME_2=="KotaBekasi" | NAME_2=="Depok" | NAME_2=="KotaTangerang" | NAME_2=="TangerangSelatan" | NAME_2=="Tangerang" | NAME_2=="Bogor")%>%
+  mutate(
+    NAME_2 = case_when(
+      NAME_2 == "KotaBekasi" ~ "Bekasi City",
+      NAME_2 == "KotaTangerang" ~ "Tangerang City",
+      NAME_2 == "TangerangSelatan" ~ "South Tangerang",
+      NAME_2 == "Tangerang" ~ "Tangerang Regency",
+      NAME_2 == "Depok" ~ "Depok City",
+      NAME_2 == "Bekasi" ~ "Bekasi Regency",
+      NAME_2 == "Bogor" ~ "Bogor Regency",
+      TRUE ~ " "
+    )
+  )%>%select(c(NAME_2, geometry))
+
+
+airport<-st_read("hotosm_idn_airports_points_gpkg/hotosm_idn_airports_points_gpkg.gpkg")%>%
+   filter(name=="Bandara Soekarno-Hatta Airport Terminal 2")%>%
+   mutate(
+    name = case_when(
+      name == "Bandara Soekarno-Hatta Airport Terminal 2" ~ "Soekarno-Hatta\nInternational Airport",TRUE ~ " "
+    )
+  )%>%select(c(name, geom)) #https://data.humdata.org/dataset/hotosm_idn_airports
+
+seaport<-st_read("hotosm_idn_sea_ports_points_gpkg/hotosm_idn_sea_ports_points_gpkg.gpkg")%>%
+   filter(name=="Pelabuhan Tanjung Priok")%>%
+   mutate(
+    name = case_when(
+      name == "Pelabuhan Tanjung Priok" ~ "Tanjung Priok Port",TRUE ~ " "
+    )
+  )%>%select(c(name, geom)) #https://data.humdata.org/dataset/hotosm_idn_sea_ports
+```
+
+
+```{r}
+summary(overall_metrics)
+```
+
+
+This code chunk is for generating a choropleth map that visualizes the percentage of Covid-19 positive cases in Wards of Jakarta. 
+```{r}
+color_palette <- colorRampPalette(c("#ffffff", "#FFA500", "#ff0000"))(9)
+
+
+positivecase_map<-ggplot() + geom_sf(data = overall_metrics, aes(fill = positive_case_percentage), color = scales::alpha("black", 0.2), size = 1) +
+  geom_sf(data = jakarta_district, fill = NA, color = "black", size = 50, linetype = "solid") +
+  geom_sf_text(data = jakarta_district, aes(label = NAME_2), size = 3, color = "black", fontface = "bold")+
+  scale_fill_gradientn(
+    colors = color_palette, 
+    name = "COVID-19\nCase (%)", 
+    breaks = pretty(overall_metrics$positive_case_percentage, n = 5), 
+    labels = pretty(overall_metrics$positive_case_percentage, n = 5)
+  ) +
+  annotation_scale(
+    location = "bl",  
+    width_hint = 0.5  
+  ) +
+  annotation_north_arrow(
+    location = "bl",  
+    which_north = "true", 
+    pad_x = unit(0.8, "cm"),  
+    pad_y = unit(0.8, "cm"),  
+    style = north_arrow_fancy_orienteering 
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 13, hjust = 0.5, face = "bold"), 
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 11),
+    legend.position = "right", 
+    legend.key.size = unit(0.8, "cm"),
+    axis.title = element_blank()
+  ) +
+  ggtitle("(a) COVID-19 Positive Case\nper Ward Population (Oct 2020)") 
+positivecase_map
+
+#code source: (OpenAI, 2024e)
+```
+# Spatial Autocorrelation: Moran's I Test
+
+This code chunk performs a Moran's I test to assess spatial autocorrelation in the `positive_case_percentage` variable across the wards in Jakarta with row-standardized weights and queen contiguity. The Moran's I statistic of 0.2230636 indicates a mild positive spatial autocorrelation which suggest a relatively weak clusters of Covid-19 cases in Jakarta based on data from March to October 2020.
+
+```{r}
+overall_metrics$ROWNUM <- 1:nrow(overall_metrics)
+overall_metrics_sp <- as(overall_metrics, "Spatial")
+overall_metrics_nb <- poly2nb(overall_metrics, row.names = overall_metrics$ROWNUM)
+overall_metrics_weights_list <- nb2listw(overall_metrics_nb, style='W')
+
+# Moran's I
+mi_value <- moran(overall_metrics_sp$positive_case_percentage,overall_metrics_weights_list,n=length(overall_metrics_weights_list$neighbours),S0=Szero(overall_metrics_weights_list))
+
+mi_value
+
+#code source: (Musah, 2024a)
+```
+I then perform a Monte Carlo simulation of Moran's I using the moran.mc function to assess spatial autocorrelation in the positive_case_percentage variable across Jakarta's wards. This simulation used 599 iterations (nsim=599) to evaluates the significance of the observed Moran's I statistic. The resulting p-value of 0.001667 indicates statistically significant evidence of positive Covid-19 clusters
+```{r}
+mc_model <- moran.mc(overall_metrics_sp$positive_case_percentage, overall_metrics_weights_list, nsim=599)
+mc_model
+
+#code source: (Musah, 2024a)
+```
+Local Moran’s I (or LISA)
+The next step is to show the cluster with  Local Moran’s I (or LISA)
+```{r}
+local_moran<-localmoran(overall_metrics_sp$positive_case_percentage, overall_metrics_weights_list)
+overall_metrics_sp$scale_positive_case_percentage <- scale(overall_metrics_sp$positive_case_percentage)
+overall_metrics_sp$lag_scale_positive_case_percentage <- lag.listw(overall_metrics_weights_list, overall_metrics_sp$positive_case_percentage)
+overall_metrics_moran_stats <- st_as_sf(overall_metrics_sp)
+
+#code source: (Musah, 2024a)
+```
+
+This code chunk assigns categories (High-High, Low-Low, High-Low, Low-High, Not-Significant ) based on local Moran's I statistics to identify spatial clusters of positive Covid-19 case percentages in Jakarta.
+```{r}
+sig_level <- 0.05
+overall_metrics_moran_stats$quad_sig <- ifelse(overall_metrics_moran_stats$scale_positive_case_percentage > 0 & 
+                                          overall_metrics_moran_stats$lag_scale_positive_case_percentage > 0 & 
+                                          local_moran[,5] <= sig_level, 
+                                          'High-High', 
+                                   ifelse(overall_metrics_moran_stats$scale_positive_case_percentage <= 0 & 
+                                          overall_metrics_moran_stats$lag_scale_positive_case_percentage <= 0 & 
+                                          local_moran[,5] <= sig_level, 
+                                          'Low-Low', 
+                                   ifelse(overall_metrics_moran_stats$scale_positive_case_percentage > 0 & 
+                                         overall_metrics_moran_stats$lag_scale_positive_case_percentage <= 0 & 
+                                          local_moran[,5] <= sig_level, 
+                                          'High-Low', 
+                                   ifelse(overall_metrics_moran_stats$scale_positive_case_percentage <= 0 & 
+                                          overall_metrics_moran_stats$lag_scale_positive_case_percentage > 0 & 
+                                         local_moran[,5] <= sig_level, 
+                                          'Low-High',
+                                   ifelse(local_moran[,5] > sig_level, 
+                                          'Not-Significant', 
+                                          'Not-Significant')))))
+
+overall_metrics_moran_stats$quad_non_sig <- ifelse(overall_metrics_moran_stats$scale_positive_case_percentage > 0 & 
+                                              overall_metrics_moran_stats$lag_scale_positive_case_percentage > 0, 
+                                              'High-High', 
+                                       ifelse(overall_metrics_moran_stats$scale_positive_case_percentage <= 0 & 
+                                              overall_metrics_moran_stats$lag_scale_positive_case_percentage <= 0, 
+                                              'Low-Low', 
+                                       ifelse(overall_metrics_moran_stats$scale_positive_case_percentage > 0 & 
+                                              overall_metrics_moran_stats$lag_scale_positive_case_percentage <= 0, 
+                                              'High-Low', 
+                                       ifelse(overall_metrics_moran_stats$scale_positive_case_percentage <= 0 & 
+                                              overall_metrics_moran_stats$lag_scale_positive_case_percentage > 0,
+                                              'Low-High',NA))))
+
+#code source: (Musah, 2024a)
+```
+
+This map reveals a cluster of wards with a high percentage of positive Covid-19 cases concentrated in Central Jakarta.
+```{r}
+localmoran_positivecase_map<-ggplot() + geom_sf(data = overall_metrics_moran_stats, aes(fill = quad_sig), color = scales::alpha("black", 0.2), size = 1) +
+  geom_sf(data = jakarta_district, fill = NA, color = "black", size = 50, linetype = "solid") +
+  geom_sf_text(data = jakarta_district, aes(label = NAME_2), size = 3, color = "black", fontface = "bold")+
+  scale_fill_manual(
+    values = c(
+      "High-High" = "#fc7558", 
+      "Low-Low" = "#FFC0CB", 
+      "High-Low" = "orange", 
+      "Low-High" = "#58defc", 
+      "Not-Significant" = "white"
+    ),
+    name = "Cluster Type"
+  ) +
+  annotation_scale(
+    location = "bl",  
+    width_hint = 0.5  
+  ) +
+  annotation_north_arrow(
+    location = "bl",  
+    which_north = "true", 
+    pad_x = unit(0.8, "cm"),  
+    pad_y = unit(0.8, "cm"),  
+    style = north_arrow_fancy_orienteering 
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 11),
+    axis.title = element_blank()
+  ) +
+  ggtitle("(b) Local Moran's I Classification Map")
+
+localmoran_positivecase_map
+
+#source: (OpenAI, 2024e)
+```
+```{r}
+library(patchwork)
+combined_covidcase <- (positivecase_map | localmoran_positivecase_map)
+
+ggsave("combined_covidcase.png", combined_covidcase, width = 12.5, height = 4)
+
+#code source: (OpenAI, 2024g)
+```
+
+Regression
+
+This study aims to explain the clustering of Covid-19 positive cases observed in Jakarta's wards. The research questions driving this analysis are: Is there a spatial pattern or clustering of Covid-19 positive cases at the ward level in Jakarta during the period of March–October 2020? and Are there socioeconomic factors or inequalities that might explain this phenomenon?
+
+To address these questions, I gathered ward-level data from 2020 that could potentially explain the spatial distribution of Covid-19 cases. The dependent variable for this study is the percentage of Covid-19 positive cases per ward population. The independent variables include: Poverty Vulnerability Index, Environmental and Health Vulnerability Index, Physical Infrastructure Vulnerability Index, Security and Order Vulnerability Index, Male Population Percentage, Population aged 60 years and above, Physical Disability Population Percentage, Cognitive Disability Population Percentage, Cognitive and Physical Disability Population Percentage, Hospital Coverage Percentage,Health Centers Coverage Percentage, Doctor's Practice and Pharmacy Coverage Percentage, Restaurant and Store Coverage Percentage, Hotel and Accommodation Coverage Percentage, and Market Coverage Percentage.
+
+For the analysis, I plan to use Ordinary Least Squares (OLS), Spatial Lag, Spatial Error, and Geographically Weighted Regression (GWR) models. Initially, I will compare the performance of global regression models—such as OLS, Spatial Lag, and Spatial Error—by selecting the model with the lowest Akaike Information Criterion (AIC). Once the best-fitting global model is identified, I will report the model coefficients to highlight the impact of each variable. Subsequently, I will perform a  a GWR analysis to evaluate local regression effects within each ward and identify specific areas requiring focused intervention by the Jakarta government.
+
+Given the large number of independent variables, I will use Stepwise regression to simplify the model by selecting only the most significant variables.
+
+Since many of the variables are in discrete form, I will apply a log transformation to convert them into continuous variables, making them more suitable for linear regression. For columns containing zero values, a small constant (0.0001) will be added before transformation to avoid mathematical issues. 
+```{r}
+columns_to_modify <- c("positive_case_percentage",
+                       "death_case_percentage",
+                       "poverty_prone_index", 
+                       "environmental_and_health_vulnerability_index", 
+                       "physical_infrastructure_vulnerability_index", 
+                       "security_and_order_vulnerability_index", 
+                       "male_population_percentage",
+                       "old_population_percentage",
+                       "physical_disability_population_percentage",
+                       "cognitive_disability_population_percentage",
+                       "cognitive_physical_disability_population_percentage",
+                       "hospital_coverage_percentage", 
+                       "healthcenter_coverage_percentage", 
+                       "doctor_pharmacy_coverage_percentage",
+                       "stores_coverage_percentage", "hotels_coverage_percentage", "markets_coverage_percentage")
+
+overall_metrics <- overall_metrics %>%
+  mutate(across(all_of(columns_to_modify), 
+                ~ ifelse(. == 0, . + 0.0001, .)))
+
+#code source: (OpenAI, 2024a)
+```
+
+Stepwise Regression
+```{r}
+lm_stepwise <- step(
+  lm(log(positive_case_percentage) ~ log(poverty_prone_index)+
+                   log(environmental_and_health_vulnerability_index) + 
+                    log(physical_infrastructure_vulnerability_index) +
+                    log(security_and_order_vulnerability_index) +
+                    log(male_population_percentage) +
+                    log(old_population_percentage) +
+                    log(physical_disability_population_percentage) +
+                    log(cognitive_disability_population_percentage) +
+                    log(cognitive_physical_disability_population_percentage) +
+                    log(hospital_coverage_percentage) +
+                    log(healthcenter_coverage_percentage)+
+                    log(doctor_pharmacy_coverage_percentage)+ 
+                    log(stores_coverage_percentage) + 
+                    log(hotels_coverage_percentage) + 
+                    log(markets_coverage_percentage),overall_metrics),
+  direction = "both"  
+)
+summary(lm_stepwise)
+
+#code source:(Sanderson, 2023)
+```
+
+The Stepwise Regression resulted in an Adjusted R-squared of 0.3324 and a p-value of < 2.2e-16. This indicates that the selected independent variables collectively explain 33.24% of the variation in the dependent variable. The selected variables are the Physical Infrastructure Vulnerability Index, Male Population Percentage, Population aged 60 years and above percentage, Cognitive Disability Population Percentage, Health Centers Coverage Percentage, Doctor's Practice and Pharmacy Coverage Percentage, and Hotel and Accommodation Coverage Percentage. Among these, the Health Centers Coverage Percentage variable was not statistically significant. As a result, this variable will be excluded from subsequent regression analyses, though this exclusion may lead to a slight reduction in the Adjusted R-squared value.
+
+
+```{r}
+lm_standard_positive <- lm(log(positive_case_percentage) ~ log(physical_infrastructure_vulnerability_index) +
+                    log(male_population_percentage) +
+                    log(old_population_percentage) +
+                    log(cognitive_disability_population_percentage) +
+                    log(doctor_pharmacy_coverage_percentage)+ 
+                    log(hotels_coverage_percentage),overall_metrics)
+
+summary(lm_standard_positive)
+
+#code source: (Musah, 2024b)
+```
+The linear regression resulted in an Adjusted R-squared value of 0.326 and a p-value of < 2.2e-16. However, we need to check that the assumptions of linear regression are met, which include: a linear relationship between the dependent and independent variables, no multicollinearity among the independent variables, normally distributed residuals, homoscedasticity, and independence of errors. (MacLachlan and Dennett, 2022)
+
+```{r}
+plot_positive_case_percentage <- ggplot(overall_metrics, aes(x = log(positive_case_percentage))) + 
+  geom_histogram(aes(y = ..density..)) + 
+  geom_density(colour = "red", 
+               size = 1, 
+               adjust = 1) + 
+  ggtitle("(a) COVID-19 Positive Case\nPercentage") + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5),
+    axis.text.x = element_text(size = 1)
+  ) + labs(
+    x = "Log of Positive\nCase Percentage", 
+    y = NULL                             
+  )
+
+plot_physical_infrastructure_vulnerability_index <- ggplot(overall_metrics, aes(x = log(physical_infrastructure_vulnerability_index))) + geom_histogram(aes(y = ..density..)) + 
+  geom_density(colour = "red", 
+               size = 1, 
+               adjust = 1) + 
+  ggtitle("(b) Infrastructure Vulnerability\nIndex Percentage") + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5),axis.text.x = element_text(size = 1)
+  ) + labs(
+    x = "Log Infrastructure\nIndex Percentage", 
+    y = NULL                             
+  )
+  
+
+plot_male_population_percentage <- ggplot(overall_metrics, aes(x = log(male_population_percentage))) + geom_histogram(aes(y = ..density..)) + 
+  geom_density(colour = "red", 
+               size = 1, 
+               adjust = 1) + 
+  ggtitle("(c) Male Population\nPercentage") + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5),axis.text.x = element_text(size = 1)
+  ) + labs(
+    x = "Log Male Population\nPercentage", 
+    y = NULL                             
+  )
+
+plot_old_population_percentage <- ggplot(overall_metrics, aes(x = log(old_population_percentage))) + geom_histogram(aes(y = ..density..)) + 
+  geom_density(colour = "red", 
+               size = 1, 
+               adjust = 1) + 
+  ggtitle("(d) Population aged 60 years\nand above Percentage") + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5),axis.text.x = element_text(size = 1)
+  ) + labs(
+    x = "Log Population >60 years\nPercentage", 
+    y = NULL                             
+  )
+
+plot_cognitive_disability_population_percentage <- ggplot(overall_metrics, aes(x = log(cognitive_disability_population_percentage))) + geom_histogram(aes(y = ..density..)) + 
+  geom_density(colour = "red", 
+               size = 1, 
+               adjust = 1) + 
+  ggtitle("(e) Cognitive Disability\nPopulation Percentage") + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5),axis.text.x = element_text(size = 1)
+  ) + labs(
+    x = "Log Cognitive Disability\nPopulation Percentage", 
+    y = NULL                             
+  )
+
+plot_doctor_pharmacy_coverage_percentage <- ggplot(overall_metrics, aes(x = log(doctor_pharmacy_coverage_percentage))) + geom_histogram(aes(y = ..density..)) + 
+  geom_density(colour = "red", 
+               size = 1, 
+               adjust = 1) + 
+  ggtitle("(f) Doctor's Practice and\nPharmacy Coverage") + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5),axis.text.x = element_text(size = 1)
+  ) + labs(
+    x = "Log Doctor's Practice and\nPharmacy Coverage", 
+    y = NULL                             
+  )
+
+plot_hotels_coverage_percentage <- ggplot(overall_metrics, aes(x = log(hotels_coverage_percentage))) + geom_histogram(aes(y = ..density..)) + 
+  geom_density(colour = "red", 
+               size = 1, 
+               adjust = 1) + 
+  ggtitle("(g) Hotel and Accommodation Coverage") + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5),axis.text.x = element_text(size = 1)
+  ) + labs(
+    x = "Log Hotel and Accommodation\nCoverage", 
+    y = NULL                             
+  )
+
+grid.arrange(plot_positive_case_percentage, 
+             plot_physical_infrastructure_vulnerability_index, 
+             plot_male_population_percentage,
+             plot_old_population_percentage,
+             plot_cognitive_disability_population_percentage,
+             plot_doctor_pharmacy_coverage_percentage,
+             plot_hotels_coverage_percentage)
+
+#code source: (MacLachlan and Dennett, 2022; OpenAI, 2024b)
+```
+From the plots, none of the variables appear to be normally distributed. The dependent variable and the percentage of the population aged 60 years and above are the closest to being normally distributed which might also indicate a strong correlation between the two. While the skewness of the variables could affect the model's accuracy, it is still technically feasible to proceed with the regression.
+
+In terms of correlation, most variables show very low correlation, with an average correlation of only 0.072. The variable most strongly correlated with the dependent variable is the percentage of the population aged 60 years and above, with a correlation coefficient of 0.27. Regarding multicollinearity, all variable showcased VIF scores below 10 which indicate absence of multicollinearity between the independent variables."
+```{r}
+#Correlation
+overall_metrics_matrix<- overall_metrics%>%
+  st_drop_geometry()%>%
+  select(c("positive_case_percentage",
+           "physical_infrastructure_vulnerability_index", 
+           "male_population_percentage",
+           "old_population_percentage",
+           "cognitive_disability_population_percentage",
+           "doctor_pharmacy_coverage_percentage",
+           "hotels_coverage_percentage"))
+
+cor_matrix<-cor(overall_metrics_matrix, method="pearson")
+print(cor_matrix)
+
+#Multicollinearity
+vif(lm_standard_positive)
+
+#(MacLachlan and Dennett, 2022)
+```
+
+Furthermore, when fitting a linear regression model, it is essential to test whether the residuals meet the following assumptions: the residuals should follow a normal distribution, exhibit homoscedasticity when plotted against the fitted predictions, and should not deviate significantly from the line of best fit in the Q-Q plot (Musah, 2024b).
+
+The histogram reveals a bell-shaped distribution centered around zero, suggesting the residuals are approximately normal. The residuals vs. fitted values plot shows that most values are scattered in a random pattern with some small deviations. Similarly, the Q-Q plot indicates that most points align closely with the line although the tails deviate slightly. These patterns suggest that while the residuals are close to being normally distributed, they do not fully meet the assumption. This is further confirmed by the Shapiro-Wilk test, which resulted in W = 0.97085 and p-value = 3.579e-05. Since the null hypothesis of the Shapiro-Wilk test assumes normality, the small p-value provides strong evidence against the null hypothesis, indicating the residuals are not normally distributed.
+
+```{r}
+residuals_data <- data.frame(
+  Fitted = lm_standard_positive$fitted.values,
+  Residuals = resid(lm_standard_positive)
+)
+
+# Histogram and Density Plot of Residuals
+histogram_residual<-ggplot(residuals_data, aes(x = Residuals)) + 
+  geom_histogram(aes(y = ..density..), 
+                 fill = "#2c3e50", color = "black", bins = 20, alpha = 0.6) + 
+  geom_density(colour = "red", size = 1, adjust = 1) + 
+  labs(title = "(a) Linear Regression Model Residuals",
+       x = "Residuals",
+       y = "Density") +
+  theme_bw(base_size = 14) +  # Cleaner background with larger text
+  theme(plot.title = element_text(hjust = 0.5,size = 17, face = "bold"), 
+        axis.title = element_text(size = 12), 
+        axis.text = element_text(size = 12))
+
+histogram_residual
+
+# Shapiro-Wilk Test for Normality
+shapiro_test_residual <- shapiro.test(residuals_data$Residuals)
+print(shapiro_test_residual)
+
+# Residuals vs Fitted Values Plot
+ggplot(residuals_data, aes(x = Fitted, y = Residuals)) +
+  geom_point(size = 3, color = "#2980b9", alpha = 0.7) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed", size = 1) +
+  labs(title = "Residuals vs Fitted Values",
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme_bw(base_size = 14) +  # Cleaner background with larger text
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.title = element_text(size = 12), 
+        axis.text = element_text(size = 10))
+
+# Q-Q Plot of Residuals
+qqplot<-ggplot(residuals_data, aes(sample = Residuals)) + 
+  geom_qq() + 
+  geom_qq_line(colour = "red", size = 1) + 
+  ggtitle("(b) Q-Q Plot of Residuals") + 
+  theme_bw(base_size = 14) +  # Cleaner background with larger text
+  theme(plot.title = element_text(hjust = 0.5, size = 17, face = "bold"), 
+        axis.title = element_text(size = 12), 
+        axis.text = element_text(size = 12)) +
+  labs(x = "Theoretical Quantiles",
+       y = "Observed Quantiles")
+
+qqplot
+
+combined_residualplot <- (histogram_residual | qqplot)
+
+# Save the combined plot as an image
+ggsave("combined_residualplot.png", combined_residualplot, width = 15, height = 6)
+
+#code source: (MacLachlan and Dennett, 2022; OpenAI, 2024g; OpenAI, 2024d)
+```
+
+
+The lack of normality in the residuals could be attributed to data artifacts (e.g., critical errors in the data) or residuals being correlated with each other. In geospatial analysis, residuals are often correlated due to spatial elements that cannot be captured by standard regression models. To investigate this further, Global Moran's I can be used to assess the spatial autocorrelation of the residuals. 
+
+source: (Musah, 2024b)
+```{r}
+overall_metrics$RESIDUALS <- lm_standard_positive$residuals
+summary(overall_metrics$RESIDUALS)
+overall_metrics$ROWNUM <- 1:nrow(overall_metrics)
+overall_metrics_2.0 <- as(overall_metrics, "Spatial")
+Weights <- poly2nb(overall_metrics_2.0, row.names = overall_metrics_2.0$ROWNUM)
+WeightsMatrix <- nb2mat(Weights, style='B')
+Residual_WeightMatrix <- mat2listw(WeightsMatrix , style='W')
+lm.morantest(lm_standard_positive, Residual_WeightMatrix, alternative="two.sided")
+
+#code source: (Musah, 2024b)
+```
+
+The Global Moran's I value of 0.1121 and a p-value of 0.0047 indicate statistically significant evidence of low residual correlation. For this reason, spatial lag and error regression models are more appropriate.
+
+Spatial Lag Regression
+The Idea of Spatial Lag Model, specifically the Spatial Lag Model on the dependent variable, assumes that spatial dependencies exist among the values of the dependent variable. The results from the model show a ρ value of 0.3127 (p-value = 1.76e-05), indicating statistically significant evidence of a positive spillover effect of Covid-19 cases from neighboring wards. Additionally, the AIC for the lag model (221.85) is lower than that of the original linear regression model (238.28), suggesting that the lag model provides a better fit.
+
+source: (Musah, 2024b)
+```{r}
+modelSLY <-lagsarlm(log(positive_case_percentage) ~ log(physical_infrastructure_vulnerability_index) +
+                    log(male_population_percentage) +
+                    log(old_population_percentage) +
+                    log(cognitive_disability_population_percentage) +
+                    log(doctor_pharmacy_coverage_percentage)+ 
+                    log(hotels_coverage_percentage),data = overall_metrics_2.0, Residual_WeightMatrix)
+summary(modelSLY)
+
+#code source: (Musah, 2024b)
+```
+
+The p-value of 0.8891 for Moran's I on the residuals of the lag model indicates no evidence of spatial autocorrelation. This suggests that the lag model effectively addresses the issue of spatial autocorrelation in the residuals.
+```{r}
+overall_metrics$RESID_SLY <- modelSLY$residuals
+moran.mc(overall_metrics$RESID_SLY, Residual_WeightMatrix, 1000, zero.policy = T)
+
+#code source: (Musah, 2024b)
+```
+
+Furthermore, the direct, indirect, and total effects of the independent variables are all statistically significant, except for the indirect effect of the Doctor's Practice and Pharmacy Coverage Percentage variable (p-value: 0.101). Notably, the primary influence of the independent variables arises from their direct effects. Among these, the male population percentage exhibits the largest total impact of 7.24, indicating that a 1% increase in the male population percentage is associated with a 7.24% increase in the positive Covid-19 cases in a ward (on the log-scale). Specifically, the direct effect of the male population percentage plays the most significant role in this total impact where a 1% increase in the male population within a ward resulting in a 5.1% increase in of positive Covid-19 cases in that same ward (on the log-scale).
+
+source: (Musah, 2024b)
+```{r}
+Weights_2.0 <- as(Residual_WeightMatrix, "CsparseMatrix")
+trMC <- trW(Weights_2.0, type="MC")
+summary(impacts(modelSLY, tr = trMC, R=100), zstats=TRUE)
+
+#Musah, A. (2024b). Spatial Models: Part 1. [online] GEOG0114: Principles of Spatial Analysis (2024/25). Available at: https://uclpg-msc-sgds.github.io/GEOG0114/spatial-models-part-1.html [Accessed 26 Dec. 2024].
+```
+
+Spatial Error Model
+In a Spatial Error Model, it is assumed that the error terms are correlated across observations. The λ value, which represents the influence of the error term for positive Covid-19 cases in neighboring wards, is 0.25737 (p-value: 0.0056), indicating statistically significant evidence of this effect. Regarding model performance, the AIC for the error model is 232.62, which is an improvement over the linear regression model (AIC: 238.28). However, it performs worse than the lag model, which has the lowest AIC of 221.85.
+
+source: (Musah, 2024b)
+```{r}
+modelSER <- errorsarlm(log(positive_case_percentage) ~ log(physical_infrastructure_vulnerability_index) +
+                    log(male_population_percentage) +
+                    log(old_population_percentage) +
+                    log(cognitive_disability_population_percentage) +
+                    log(doctor_pharmacy_coverage_percentage)+ 
+                    log(hotels_coverage_percentage),data = overall_metrics_2.0, Residual_WeightMatrix)
+
+summary(modelSER)
+
+#code source: (Musah, 2024b)
+```
+Observing the residuals of the error model indicates that there is still evidence of spatial autocorrelation, as indicated by Moran's I (p-value = 0.5365).
+
+Given this, the lag model emerges as the best-performing model compared to both the linear and error models.
+```{r}
+overall_metrics$RESID_SER <- modelSER$residuals
+moran.mc(overall_metrics$RESID_SER, Residual_WeightMatrix, 1000, zero.policy = T)
+
+#code source: (Musah, 2024b)
+```
+
+GWR
+
+Geographically Weighted Regression (GWR) addresses the limitations of standard linear models, as well as spatial lag and error regression models, which produce only a single global set of estimates. GWR allows for the exploration of how the relationships between a dependent variable and a set of predictors vary across space. In this study, an Adaptive Bandwidth is utilized for the GWR model, which is the preferred approach. This method allows the algorithm to compute and apply an adaptive kernel that uses varying bandwidths to define regions around regression points, rather than relying on a fixed bandwidth.
+
+source: anwar
+```{r}
+overall_metrics2 <- st_centroid(overall_metrics)
+overall_metrics2 <- cbind(overall_metrics2, st_coordinates(overall_metrics2))
+
+BwG <- gwr.sel(log(positive_case_percentage) ~ log(physical_infrastructure_vulnerability_index) +
+                    log(male_population_percentage) +
+                    log(old_population_percentage) +
+                    log(cognitive_disability_population_percentage) +
+                    log(doctor_pharmacy_coverage_percentage)+ 
+                    log(hotels_coverage_percentage),data = overall_metrics2, coords = cbind(overall_metrics2$X, overall_metrics2$Y), adapt = TRUE)
+
+gwr.model <- gwr(log(positive_case_percentage) ~ log(physical_infrastructure_vulnerability_index) +
+                    log(male_population_percentage) +
+                    log(old_population_percentage) +
+                    log(cognitive_disability_population_percentage) +
+                    log(doctor_pharmacy_coverage_percentage)+ 
+                    log(hotels_coverage_percentage),data = overall_metrics2, coords = cbind(overall_metrics2$X, overall_metrics2$Y), adapt=BwG, hatmatrix=TRUE, se.fit=TRUE)
+
+gwr.model
+
+#code source: (Musah, 2024c)
+```
+
+The columns in the gwr.data contain ward-specific coefficient and standard error estimates for the independent variables in Jakarta. These values can be used to assess whether the associations between the dependent and independent variables in each ward are statistically significant. Additionally, this section includes the extraction of local R-squared values for each ward.
+
+anwar
+```{r}
+gwr.data <- as.data.frame(gwr.model$SDF)
+gwr_result <- st_drop_geometry(overall_metrics[,c(1,2)])
+
+gwr_result$CoefLoginfrastructure <- gwr.data[,"log.physical_infrastructure_vulnerability_index."]
+gwr_result$CoefLogmalepop <- gwr.data[,"log.male_population_percentage."]
+gwr_result$CoefLogoldpop <- gwr.data[,"log.old_population_percentage."]
+gwr_result$CoefLogcognitivedis <- gwr.data[,"log.cognitive_disability_population_percentage."]
+gwr_result$CoefLogdoctorpharmacy <- gwr.data[,"log.doctor_pharmacy_coverage_percentage."]
+gwr_result$CoefLoghotel <- gwr.data[,"log.hotels_coverage_percentage."]
+
+gwr_result$SELoginfrastructure <- gwr.data[,"log.physical_infrastructure_vulnerability_index._se"]
+gwr_result$SELogmalepop <- gwr.data[,"log.male_population_percentage._se"]
+gwr_result$SELogoldpop <- gwr.data[,"log.old_population_percentage._se"]
+gwr_result$SELogcognitivedis <- gwr.data[,"log.cognitive_disability_population_percentage._se"]
+gwr_result$SELogdoctorpharmacy <- gwr.data[,"log.doctor_pharmacy_coverage_percentage._se"]
+gwr_result$SELoghotel <- gwr.data[,"log.hotels_coverage_percentage._se"]
+
+gwr_result$localR2 <- gwr.data[,"localR2"]
+
+# compute t-score statistic
+gwr_result$tstatLoginfrastructure <- gwr_result$CoefLoginfrastructure / gwr_result$SELoginfrastructure
+gwr_result$tstatLogmalepop <- gwr_result$CoefLogmalepop / gwr_result$SELogmalepop
+gwr_result$tstatLogoldpop <- gwr_result$CoefLogoldpop / gwr_result$SELogoldpop
+gwr_result$tstatLogcognitivedis <- gwr_result$CoefLogcognitivedis / gwr_result$SELogcognitivedis
+gwr_result$tstatLogdoctorpharmacy <- gwr_result$CoefLogdoctorpharmacy / gwr_result$SELogdoctorpharmacy
+gwr_result$tstatLoghotel <- gwr_result$CoefLoghotel / gwr_result$SELoghotel
+
+#code source: (Musah, 2024c)
+```
+
+After calculating the z-value, the significance of each ward can be determined. If the z-value is below -2, it indicates statistically significant evidence of a reduction in positive COVID-19 cases when the corresponding independent variable increases. Conversely, if the z-value is above 2, it signifies statistically significant evidence of an increase in positive COVID-19 cases with an increase in the respective independent variable. Z-values between -2 and 2 are considered not statistically significant.
+```{r}
+
+gwr_result$significance_infrastructure <- cut(gwr_result$tstatLoginfrastructure,
+    breaks=c(-Inf, -2, 2, Inf),
+    labels=c("Reduction: Significant","Not Significant", "Increase: Significant"))
+gwr_result$significance_male_pop <- cut(gwr_result$tstatLogmalepop,
+    breaks=c(-Inf, -2, 2, Inf),
+    labels=c("Reduction: Significant","Not Significant", "Increase: Significant"))
+gwr_result$significance_old_pop <- cut(gwr_result$tstatLogoldpop,
+    breaks=c(-Inf, -2, 2, Inf),
+    labels=c("Reduction: Significant","Not Significant", "Increase: Significant"))
+gwr_result$significance_cognitive_impairment_pop <- cut(gwr_result$tstatLogcognitivedis,
+    breaks=c(-Inf, -2, 2, Inf),
+    labels=c("Reduction: Significant","Not Significant", "Increase: Significant"))
+gwr_result$significance_doctor <- cut(gwr_result$tstatLogdoctorpharmacy,
+    breaks=c(-Inf, -2, 2, Inf),
+    labels=c("Reduction: Significant","Not Significant", "Increase: Significant"))
+gwr_result$significance_hotel <- cut(gwr_result$tstatLoghotel,
+    breaks=c(-Inf, -2, 2, Inf),
+    labels=c("Reduction: Significant","Not Significant", "Increase: Significant"))
+
+gwr_result <- gwr_result %>%
+  mutate(
+    significance = case_when(
+      rowSums(across(
+        c(significance_infrastructure, significance_male_pop, significance_old_pop, 
+          significance_cognitive_impairment_pop, significance_doctor, significance_hotel),
+        ~ . %in% c("Increase: Significant", "Reduction: Significant")
+      )) >= 6 ~ "Significant",
+      TRUE ~ "Not Significant"
+    )
+  )
+
+#code source: (Musah, 2024c; OpenAI, 2024c)
+```
+
+The next step involves merging the significant classifications with the main dataset.
+```{r}
+gwr_result<-gwr_result%>%
+   select(c(ward_id,localR2, significance_infrastructure, significance_male_pop, significance_old_pop, significance_cognitive_impairment_pop, significance_doctor, significance_hotel, significance))
+  
+overall_metrics<-overall_metrics%>%
+  left_join(gwr_result, by = c("ward_id" = "ward_id"))
+```
+
+In this section, we can begin by plotting the localR2 values to visualize the areas where the model performed well and poorly. LocalR2 values close to 1 indicate a very good model fit, while lower values suggest weaker performance.
+
+The first plot focuses on localR2 values. Areas shaded in darker blues represent regions where the local regression models performed well in predicting positive COVID-19 cases and their associations with the independent variables. Conversely, areas shaded in red indicate regions where the models exhibited poor prediction performance.
+
+From the plot, it is evident that regions with the highest localR2 values are located in Central Jakarta, North Jakarta, and West Jakarta, with localR2 values ranging from 0.5 to 0.6. Conversely, the areas with the lowest localR2 values are found in East Jakarta, ranging from 0.26 to 0.30.
+
+anwar
+
+```{r}
+spectral_palette <- brewer.pal(n = 9, name = "Spectral")
+
+gwrlocalr2<-ggplot() +
+  geom_sf(data = overall_metrics, aes(fill = localR2), color = scales::alpha("black", 0.2), size = 1) +
+  geom_sf(data = jakarta_district, fill = NA, color = "black", size = 50, linetype = "solid") +
+  geom_sf_text(data = jakarta_district, aes(label = NAME_2), size = 3, color = "black", fontface = "bold")+
+  scale_fill_gradientn(
+    colors = spectral_palette, 
+    name = "Local R2", 
+    breaks = pretty(overall_metrics$localR2, n = 5), 
+    labels = pretty(overall_metrics$localR2, n = 5)
+  ) +
+  annotation_scale(
+    location = "bl",  
+    width_hint = 0.5  
+  ) +
+  annotation_north_arrow(
+    location = "bl",  
+    which_north = "true", 
+    pad_x = unit(0.8, "cm"),  
+    pad_y = unit(0.8, "cm"),  
+    style = north_arrow_fancy_orienteering 
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 13, hjust = 0.5, face = "bold"), 
+    legend.title = element_text(size = 9, face = "bold"),
+    legend.text = element_text(size = 8),
+    legend.position = "right", 
+    legend.key.size = unit(0.8, "cm"),
+    axis.title = element_blank()
+  ) +
+  ggtitle("GWR Local R2")
+
+  gwrlocalr2
+
+#code source: (OpenAI, 2024e)
+```
+
+We can plot the significance categories of the independent variables on a map. From the visualization, it becomes apparent that some variables exhibit similar patterns. 
+
+For instance, the Infrastructure Vulnerability Index and Hotel Coverage variables display a comparable trend. A reduction in the Infrastructure Vulnerability Index is associated with a decrease in positive COVID-19 cases, while an increase in Hotel Coverage correlates with a rise in positive cases. These patterns are observed across most of Jakarta, except for a few wards in East Jakarta. This suggests that during the period of March–October 2020, factors like slum areas and population density did not significantly drive increases in positive COVID-19 cases. Instead, the rise in cases appeared to be linked to areas with a high concentration of hotels, implying that at that time, the spread of COVID-19 was largely driven by the movement of people from long distances who stayed in hotels.
+
+The variables for the male population and the population aged over 60 years exhibit a similar pattern. An increase in both of these variables is associated with a higher likelihood of positive COVID-19 cases, particularly in areas near the borders of Jakarta and neighboring cities. This may suggest that the male population, who are typically the primary workers in Indonesia, played a significant role in transmitting the virus to their own neighborhoods. Meanwhile, the older population, being more vulnerable to the disease, faced a higher risk, especially if they were not receiving adequate support from the government. The combination of these two factors—where areas with a high male population contribute to the spread of the virus to areas with a high older population—could potentially create new clusters of COVID-19 cases.
+
+Another pair of variables that show a similar pattern is the Cognitive Disability Population and Doctor’s Practice and Pharmacy Coverage. These two variables share a significance pattern predominantly in North, West, and Central Jakarta. An increase in the Cognitive Disability Population correlates with a higher likelihood of positive COVID-19 cases in the affected wards. This may be because individuals with cognitive disabilities may lack the understanding necessary to protect themselves from exposure to COVID-19. Furthermore, these areas might highlight systemic neglect, where both the population and the government fail to provide inclusive support or special treatment for individuals with cognitive disabilities.
+
+The combined impact of limited healthcare access and a vulnerable population with impairments can significantly increase the risk of new COVID-19 clusters emerging in these areas. This underscores the urgent need for swift and targeted government interventions to address these vulnerabilities and curb the further spread of the virus.
+```{r}
+plot_infrastructure<-ggplot() +
+  geom_sf(data = overall_metrics, aes(fill = significance_infrastructure), color = scales::alpha("black", 0.2), size = 1) +
+  geom_sf(data = jakarta_district, fill = NA, color = "black", size = 50, linetype = "solid") +
+  geom_sf_text(data = jakarta_district, aes(label = NAME_2), size = 3, color = "black", fontface = "bold")+
+  scale_fill_manual(
+    values = c(
+      "Reduction: Significant" = "#58defc",
+      "Not Significant" = "grey",
+      "Increase: Significant" = "#fc7558"
+    ),
+    name = "Significance",
+  ) +
+  annotation_scale(
+    location = "bl",  
+    width_hint = 0.5  
+  ) +
+  annotation_north_arrow(
+    location = "bl",  
+    which_north = "true", 
+    pad_x = unit(0.8, "cm"),  
+    pad_y = unit(0.8, "cm"),  
+    style = north_arrow_fancy_orienteering 
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 13, hjust = 0.5, face = "bold"), 
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 10),
+    legend.position = "right", 
+    legend.key.size = unit(0.8, "cm"),
+    axis.title = element_blank()
+  )+
+  ggtitle("(a) Significance of Infrastructure Variable (GWR)")
+
+
+plot_male_pop<-ggplot() +
+  geom_sf(data = overall_metrics, aes(fill = significance_male_pop), color = scales::alpha("black", 0.2), size = 1) +
+  geom_sf(data = jakarta_district, fill = NA, color = "black", size = 50, linetype = "solid") +
+  geom_sf_text(data = jakarta_district, aes(label = NAME_2), size = 3, color = "black", fontface = "bold")+
+  scale_fill_manual(
+    values = c(
+      "Increase: Significant" = "#fc7558",
+      "Reduction: Significant" = "#58defc",
+      "Not Significant" = "grey"
+    ),
+    name = "Significance",
+  ) +
+  annotation_scale(
+    location = "bl",  
+    width_hint = 0.5  
+  ) +
+  annotation_north_arrow(
+    location = "bl",  
+    which_north = "true", 
+    pad_x = unit(0.8, "cm"),  
+    pad_y = unit(0.8, "cm"),  
+    style = north_arrow_fancy_orienteering 
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 13, hjust = 0.5, face = "bold"), 
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 10),
+    legend.position = "right", 
+    legend.key.size = unit(0.8, "cm"),
+    axis.title = element_blank() 
+  ) +
+  ggtitle("(b) Significance of Male PopVariable (GWR)")
+
+plot_old_pop<-ggplot() +
+  geom_sf(data = overall_metrics, aes(fill = significance_old_pop), color = scales::alpha("black", 0.2), size = 1) +
+  geom_sf(data = jakarta_district, fill = NA, color = "black", size = 50, linetype = "solid") +
+  geom_sf_text(data = jakarta_district, aes(label = NAME_2), size = 3, color = "black", fontface = "bold")+
+  scale_fill_manual(
+    values = c(
+      "Increase: Significant" = "#fc7558",
+      "Reduction: Significant" = "#58defc",
+      "Not Significant" = "grey"
+    ),
+    name = "Significance",
+  ) +
+  annotation_scale(
+    location = "bl",  
+    width_hint = 0.5  
+  ) +
+  annotation_north_arrow(
+    location = "bl",  
+    which_north = "true", 
+    pad_x = unit(0.8, "cm"),  
+    pad_y = unit(0.8, "cm"),  
+    style = north_arrow_fancy_orienteering 
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 13, hjust = 0.5, face = "bold"), 
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 10),
+    legend.position = "right", 
+    legend.key.size = unit(0.8, "cm"),
+    axis.title = element_blank() 
+  ) +
+  ggtitle("(c) Significance of Old Population Variable (GWR)")
+
+plot_cognitive_impairment_pop<-ggplot() +
+  geom_sf(data = overall_metrics, aes(fill = significance_cognitive_impairment_pop), color = scales::alpha("black", 0.2), size = 1) +
+  geom_sf(data = jakarta_district, fill = NA, color = "black", size = 50, linetype = "solid") +
+  geom_sf_text(data = jakarta_district, aes(label = NAME_2), size = 3, color = "black", fontface = "bold") +
+  scale_fill_manual(
+    values = c(
+      "Increase: Significant" = "#fc7558",
+      "Reduction: Significant" = "#58defc",
+      "Not Significant" = "grey"
+    ),
+    name = "Significance",
+  ) +
+  annotation_scale(
+    location = "bl",  
+    width_hint = 0.5  
+  ) +
+  annotation_north_arrow(
+    location = "bl",  
+    which_north = "true", 
+    pad_x = unit(0.8, "cm"),  
+    pad_y = unit(0.8, "cm"),  
+    style = north_arrow_fancy_orienteering 
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 13, hjust = 0.5, face = "bold"), 
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 10),
+    legend.position = "right", 
+    legend.key.size = unit(0.8, "cm"),
+    axis.title = element_blank()
+  ) +
+  ggtitle("(d) Significance of Cognitive\nImpairment Population Variable (GWR)")
+
+plot_doctor<-ggplot() +
+  geom_sf(data = overall_metrics, aes(fill = significance_doctor), color = scales::alpha("black", 0.2), size = 1) +
+  geom_sf(data = jakarta_district, fill = NA, color = "black", size = 50, linetype = "solid") +
+  geom_sf_text(data = jakarta_district, aes(label = NAME_2), size = 3, color = "black", fontface = "bold")+
+  scale_fill_manual(
+    values = c(
+      "Increase: Significant" = "#fc7558",
+      "Reduction: Significant" = "#58defc",
+      "Not Significant" = "grey"
+    ),
+    name = "Significance",
+  ) +
+  annotation_scale(
+    location = "bl",  
+    width_hint = 0.5  
+  ) +
+  annotation_north_arrow(
+    location = "bl",  
+    which_north = "true", 
+    pad_x = unit(0.8, "cm"),  
+    pad_y = unit(0.8, "cm"),  
+    style = north_arrow_fancy_orienteering 
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 13, hjust = 0.5, face = "bold"), 
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 10),
+    legend.position = "right", 
+    legend.key.size = unit(0.8, "cm"),
+    axis.title = element_blank()  
+  ) +
+  ggtitle("(e) Significance of Doctor &\nPharmacy Coverage Variable (GWR)")
+
+plot_hotel<-ggplot() +
+  geom_sf(data = overall_metrics, aes(fill = significance_hotel), color = scales::alpha("black", 0.2), size = 1) +
+  geom_sf(data = jakarta_district, fill = NA, color = "black", size = 50, linetype = "solid") +
+  geom_sf_text(data = jakarta_district, aes(label = NAME_2), size = 3, color = "black", fontface = "bold")+
+  scale_fill_manual(
+    values = c(
+      "Increase: Significant" = "#fc7558",
+      "Reduction: Significant" = "#58defc",
+      "Not Significant" = "grey"
+    ),
+    name = "Significance",
+  ) +
+  annotation_scale(
+    location = "bl",  
+    width_hint = 0.5  
+  ) +
+  annotation_north_arrow(
+    location = "bl",  
+    which_north = "true", 
+    pad_x = unit(0.8, "cm"),  
+    pad_y = unit(0.8, "cm"),  
+    style = north_arrow_fancy_orienteering 
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 13, hjust = 0.5, face = "bold"), 
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 10),
+    legend.position = "right", 
+    legend.key.size = unit(0.8, "cm"),
+    axis.title = element_blank()
+  ) +
+  ggtitle("(f) Significance of Hotel Coverage Variable (GWR)")
+
+plot_infrastructure
+plot_male_pop
+plot_old_pop
+plot_cognitive_impairment_pop
+plot_doctor
+plot_hotel
+
+#code source: (OpenAI, 2024e)
+```
+
+```{r}
+combined_plot <- (plot_infrastructure | plot_male_pop)/
+  (plot_old_pop | plot_cognitive_impairment_pop) /
+  (plot_doctor | plot_hotel)
+
+ggsave("combined_plot.png", combined_plot, width = 12, height = 12.5)
+
+#code source: (OpenAI, 2024g)
+```
+
+
+This plot highlights the wards where all the independent variables are statistically significant, specifically in North and West Jakarta. These areas should be prioritized by the Jakarta government to effectively limit the spread of the virus during the early period of the pandemic (March-October 2020). Based on the variables, the government can take several actions: increasing access to healthcare in these areas, particularly by expanding the number of doctor’s practices and pharmacies; and enhancing health monitoring and regulation of hotel operations.
+
+For monitoring, the government should conduct health tracing in these wards, focusing on areas with high concentrations of male and older populations. Additionally, the government can implement a special inclusive program to protect individuals with cognitive impairments from the dangers of COVID-19 exposure.
+
+
+```{r}
+plotoverall2<-ggplot() +
+ geom_sf(data = overall_metrics, aes(fill = significance), color = scales::alpha("black", 0.2), size = 1) +
+  geom_sf(data = jakarta_district, fill = NA, color = "black", size = 50, linetype = "solid") +
+  geom_sf_text(data = jakarta_district, aes(label = NAME_2), size = 3, color = "black", fontface = "bold") +
+  geom_sf(data = neighboring_cities, fill = "lightgray", color = "gray", size = 0.5, alpha = 1) +
+  geom_sf_text(data = neighboring_cities, aes(label = NAME_2), size = 2.5, color = "black") +
+  geom_sf(data = airport, aes(geometry = geom), shape = 17, color = "black", size = 3, alpha = 1) +
+  geom_sf_text(data = airport, aes(geometry = geom, label = name), size = 3, nudge_y = 0.025, nudge_x = 0.021, color = "black") +
+  geom_sf(data = seaport, aes(geometry = geom), shape = 17, color = "black", size = 3, alpha = 1) +
+  geom_sf_text(data = seaport, aes(geometry = geom, label = name), size = 3, nudge_y = 0.02, color = "black") +
+  coord_sf(xlim = c(106.63, 107), ylim = c(-6.38, -6.05), expand = FALSE) +
+  labs(
+    title = "Significance of All Variables (GWR) with Neighboring Cities",
+    fill = "Significance"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    legend.title = element_text(size = 10, face = "bold"),
+    legend.text = element_text(size = 9),
+    axis.title.x = element_blank(),  
+    axis.title.y = element_blank()   
+  ) +
+  scale_fill_manual(
+    values = c(
+      "Significant" = "red",
+      "Not Significant" = "white"
+    ),
+    name = "Significance"
+  ) +
+  annotation_scale(
+    location = "bl",  
+    width_hint = 0.3  
+  ) +
+  annotation_north_arrow(
+    location = "bl",  
+    which_north = "true", 
+    pad_x = unit(0.8, "cm"),  
+    pad_y = unit(0.7, "cm"),  
+    style = north_arrow_fancy_orienteering 
+  ) +
+  ggtitle("Significance of All Variables (GWR)")
+
+plotoverall2
+
+
+#code source: (OpenAI, 2024e; OpenAI, 2024f)
+```
+
+
+
+Reference list
+
+MacLachlan, A. and Dennett, A. (2022). An Applied Geographic Information Systems and Science Course in R. Journal of Open Source Education, 5(50), pp.141–141. doi:https://doi.org/10.21105/jose.00141.
+
+Musah, A. (2024a). Spatial autocorrelation and dependence. [online] GEOG0114: Principles of Spatial Analysis (2024/25). Available at: https://uclpg-msc-sgds.github.io/GEOG0114/spatial-autocorrelation-and-dependence.html [Accessed 26 Dec. 2024].
+
+Musah, A. (2024b). Spatial Models: Part 1. [online] GEOG0114: Principles of Spatial Analysis (2024/25). Available at: https://uclpg-msc-sgds.github.io/GEOG0114/spatial-models-part-1.html [Accessed 26 Dec. 2024].
+
+Musah, A. (2024c). Spatial Models: Part 2. [online] GEOG0114: Principles of Spatial Analysis (2024/25). Available at: https://uclpg-msc-sgds.github.io/GEOG0114/spatial-models-part-1.html [Accessed 26 Dec. 2024].
+
+OpenAI (2024a). how can I add all zero values only in these columns ‘death_case_percentage, poverty_prone_index, environmental_and_health_vulnerability_index, physical_infrastructure_vulnerability_index, security_and_order_vulnerability_index, elderly_population_percentage, hospital_coverage_percentage, healthcenter_coverage_percentage, doctor_pharmacy_coverage_percentage’ 0.0001 so I can log them . [online] ChatGPT (December 24, 2024 Version). Available at: https://chatgpt.com/c/676c3309-acf0-800a-9eea-eb8b5d793191 [Accessed 24 Dec. 2024].
+
+OpenAI (2024b). from this code "ggplot(detailed_eviction_data_2017, aes(x=log(density))) + geom_histogram(aes(y = ..density..)) + geom_density(colour=‘red’, size=1, adjust=1)", i got this error ‘Error in geom_histogram(aes(y = ..density..)) : ℹ Error occurred in the 1st layer. Caused by error in scale_type.units():’ Variable of class ‘units’ found, but ‘units’ package is not attached. Please, attach it using ‘library(units)’ to properly show scales with units. [online] ChatGPT (December 28, 2024 Version). Available at: https://chatgpt.com/c/66ffd0c5-3064-800a-9d0e-e2cb10379e8d [Accessed 28 Dec. 2024].
+
+OpenAI (2024c). how can I plot this in ggplot ‘gwr_result$significance <- cut(gwr_result$tstatLoginfrastructure, breaks=c(min(gwr_result$tstatLoginfrastructure), -2, 2, max(gwr_result$tstatLoginfrastructure))’,. [online] ChatGPT (December 29, 2024 Version). Available at: https://chatgpt.com/c/676c3309-acf0-800a-9eea-eb8b5d793191 [Accessed 29 Dec. 2024].
+
+OpenAI (2024d). how to improve this "residuals_data <- data.frame( Fitted = lm_standard_positive$fitted.values,Residualsresid(lm_standard_positive)). [online] ChatGPT (December 27, 2024 Version). Available at: https://chatgpt.com/c/677c391c-6ce8-800a-9e36-824c81129811 [Accessed 27 Dec. 2024].
+
+OpenAI (2024e). I have ‘y’ and ‘x’ in my y-axis and x-axis in this code "plot_overall<-ggplot(). [online] ChatGPT (December 23, 2024 Version). Available at: https://chatgpt.com/c/6772c89a-cbb8-800a-b8ec-f2f92997196d [Accessed 23 Dec. 2024].
+
+OpenAI (2024f). I have this map of jakarta. But I want to also extend the map to neighbouring cities but I also want the focus is still in jakarta like this. [online] ChatGPT (December 29, 2024 Version). Available at: https://chatgpt.com/c/676c3309-acf0-800a-9eea-eb8b5d793191 [Accessed 29 Dec. 2024].
+
+OpenAI (2024g). I want to make this figure. how can i make it from this code "plot_infrastructure<-ggplot() + geom_sf(data = overall_metrics, aes(fill = significance_infrastructure), color = scales::alpha(‘black’, 0.2), size = 1). [online] ChatGPT (December 27, 2024 Version). Available at: https://chatgpt.com/c/676c3309-acf0-800a-9eea-eb8b5d793191 [Accessed 27 Dec. 2024].
+
+Sanderson, S.P.S. (2023). A Complete Guide to Stepwise Regression in R | R-bloggers. [online] R-Bloggers. Available at: https://www.r-bloggers.com/2023/12/a-complete-guide-to-stepwise-regression-in-r/.
+
+
+
+
