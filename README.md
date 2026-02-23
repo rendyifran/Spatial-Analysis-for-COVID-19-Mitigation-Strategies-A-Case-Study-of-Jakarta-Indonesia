@@ -3,7 +3,7 @@
 
 <p align="center">
   <img src="images/Spatial Map.jpg" width="40%" />
-  <img src="images/GWR.jpg" width="40%" />
+  <img src="images/GWR.pNg" width="40%" />
 </p>
 
 ---
